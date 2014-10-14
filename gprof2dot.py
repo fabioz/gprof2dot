@@ -49,11 +49,13 @@ else:
     def compat_keys(x): return x.keys()
 
 
-try:
-    # Debugging helper module
-    import debug
-except ImportError:
-    pass
+if False:
+    # Don't load debugging module by default...
+    try:
+        # Debugging helper module
+        import debug
+    except ImportError:
+        pass
 
 
 
@@ -155,8 +157,6 @@ TIME = Event("Time", 0.0, add, lambda x: '(' + str(x) + ')')
 TIME_RATIO = Event("Time ratio", 0.0, add, lambda x: '(' + percentage(x) + ')')
 TOTAL_TIME = Event("Total time", 0.0, fail)
 TOTAL_TIME_RATIO = Event("Total time ratio", 0.0, fail, percentage)
-
-totalMethod = 'callratios'
 
 
 class Object(object):
@@ -718,6 +718,9 @@ class Parser:
 
     def parse(self):
         raise NotImplementedError
+    
+    def set_options(self, options):
+        self.options = options
 
     
 class JsonParser(Parser):
@@ -1860,10 +1863,10 @@ class PerfParser(LineParser):
         profile.find_cycles()
         profile.ratio(TIME_RATIO, SAMPLES)
         profile.call_ratios(SAMPLES2)
-        if totalMethod == "callratios":
+        if self.options.totalMethod == "callratios":
             # Heuristic approach.  TOTAL_SAMPLES is unused.
             profile.integrate(TOTAL_TIME_RATIO, TIME_RATIO)
-        elif totalMethod == "callstacks":
+        elif self.options.totalMethod == "callstacks":
             # Use the actual call chains for functions.
             profile[TOTAL_SAMPLES] = profile[SAMPLES]
             profile.ratio(TOTAL_TIME_RATIO, TOTAL_SAMPLES)
@@ -2545,7 +2548,7 @@ class SleepyParser(Parser):
         return profile
 
 
-class PstatsParser:
+class PstatsParser(Parser):
     """Parser python profiling statistics saved with te pstats module."""
 
     stdinInput = False
@@ -2568,8 +2571,11 @@ class PstatsParser:
 
     def get_function_name(self, key):
         filename, line, name = key
-        module = os.path.splitext(filename)[0]
-        module = os.path.basename(module)
+        if self.options.full_names:
+            module = filename
+        else:
+            module = os.path.splitext(filename)[0]
+            module = os.path.basename(module)
         return "%s:%d:%s" % (module, line, name)
 
     def get_function(self, key):
@@ -3102,6 +3108,12 @@ def createOptionParser():
         '--skew',
         type="float", dest="theme_skew", default=Options.theme_skew,
         help="skew the colorization curve.  Values < 1.0 give more variety to lower percentages.  Values > 1.0 give less variety to lower percentages")
+    # add option to always show full names
+    optparser.add_option(
+        '--full-names',
+        action="store_true",
+        dest="full_names", default=Options.full_names,
+        help="Always shows full names instead of doing some heuristic to get a smaller name (currently affects only pstats format)")
     return optparser
 
 
@@ -3114,10 +3126,13 @@ class Options(object):
     # string (for filename) or stream for output
     output=None 
     
+    
+    full_names=False # Only pstats format
+    
     node_thres=0.5
     edge_thres=0.1
     format="prof"
-    totalMethod=totalMethod
+    totalMethod='callratios' # Only perf format
     theme="color"
     strip=False
     wrap=False
@@ -3151,9 +3166,6 @@ def handle_options(options, args, onerror):
     if options.theme_skew:
         theme.skew = options.theme_skew
 
-    global totalMethod
-    totalMethod = options.totalMethod
-
     try:
         Format = formats[options.format]
     except KeyError:
@@ -3177,6 +3189,7 @@ def handle_options(options, args, onerror):
                 onerror('exactly one file must be specified for %s input' % options.format)
             parser = Format(args[0])
 
+    parser.set_options(options)
     profile = parser.parse()
 
     if options.output is None:

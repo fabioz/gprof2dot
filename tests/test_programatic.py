@@ -57,31 +57,36 @@ class Test(unittest.TestCase):
         test_dir = os.path.dirname(os.path.abspath(__file__))
         pstats_dir = os.path.join(test_dir, 'pstats')
 
-        for filename in os.listdir(pstats_dir):
-            if filename.endswith('.pstats'):
-                pstats_file = os.path.join(pstats_dir, filename)
-
-                stats = pstats.Stats(pstats_file)
-
-                options = gprof2dot.Options()
-                options.format = "pstats"
-
-                options.output = StringIO()
-                options.input = stats
-
-                def onerror(error):
-                    raise AssertionError(error)
-                gprof2dot.handle_options(options, [], onerror)
-                value = options.output.getvalue()
-
-                expected_file = pstats_file + '.expected'
-                if REGENERATE_FILES:
-                    with open(expected_file, 'w') as stream:
-                        stream.write(value)
-                        
-                else:
-                    with open(expected_file, 'r') as stream:
-                        self.assertEqual(value, stream.read())
+        for full_names in (True, False):
+            for filename in os.listdir(pstats_dir):
+                if filename.endswith('.pstats'):
+                    pstats_file = os.path.join(pstats_dir, filename)
+    
+                    stats = pstats.Stats(pstats_file)
+    
+                    options = gprof2dot.Options()
+                    options.format = "pstats"
+                    options.full_names = full_names
+    
+                    options.output = StringIO()
+                    options.input = stats
+    
+                    def onerror(error):
+                        raise AssertionError(error)
+                    gprof2dot.handle_options(options, [], onerror)
+                    value = options.output.getvalue()
+    
+                    if full_names:
+                        expected_file = pstats_file + '.full_names.expected'
+                    else:
+                        expected_file = pstats_file + '.expected'
+                    if REGENERATE_FILES:
+                        with open(expected_file, 'w') as stream:
+                            stream.write(value)
+                            
+                    else:
+                        with open(expected_file, 'r') as stream:
+                            self.assertEqual(value, stream.read())
 
 
 if __name__ == "__main__":
