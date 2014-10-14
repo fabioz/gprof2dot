@@ -999,8 +999,7 @@ class GprofParser(Parser):
     def readline(self):
         line = self.fp.readline()
         if not line:
-            sys.stderr.write('error: unexpected end of file\n')
-            sys.exit(1)
+            show_error_and_exit('error: unexpected end of file\n')
         line = line.rstrip('\r\n')
         return line
 
@@ -1272,8 +1271,7 @@ class AXEParser(Parser):
     def readline(self):
         line = self.fp.readline()
         if not line:
-            sys.stderr.write('error: unexpected end of file\n')
-            sys.exit(1)
+            show_error_and_exit('error: unexpected end of file\n')
         line = line.rstrip('\r\n')
         return line
 
@@ -2555,14 +2553,16 @@ class PstatsParser:
 
     def __init__(self, *filename):
         import pstats
-        try:
-            self.stats = pstats.Stats(*filename)
-        except ValueError:
-            if PYTHON_3:
-                sys.stderr.write('error: failed to load %s\n' % ', '.join(filename))
-                sys.exit(1)
-            import hotshot.stats
-            self.stats = hotshot.stats.load(filename[0])
+        if len(filename) == 1 and isinstance(filename[0], pstats.Stats):
+            self.stats = filename[0]
+        else:
+            try:
+                self.stats = pstats.Stats(*filename)
+            except ValueError:
+                if PYTHON_3:
+                    show_error_and_exit('error: failed to load %s\n' % ', '.join(filename))
+                import hotshot.stats
+                self.stats = hotshot.stats.load(filename[0])
         self.profile = Profile()
         self.function_ids = {}
 
@@ -3036,14 +3036,12 @@ def naturalJoin(values):
         return ''.join(values)
 
 
-def main():
-    """Main program."""
-
-    global totalMethod
+def createOptionParser():
+    """Creates optparse.OptionParser to be used to parse the arguments."""
 
     formatNames = list(formats.keys())
     formatNames.sort()
-
+    
     optparser = optparse.OptionParser(
         usage="\n\t%prog [options] [file] ...")
     optparser.add_option(
@@ -3052,11 +3050,11 @@ def main():
         help="output filename [stdout]")
     optparser.add_option(
         '-n', '--node-thres', metavar='PERCENTAGE',
-        type="float", dest="node_thres", default=0.5,
+        type="float", dest="node_thres", default=Options.node_thres,
         help="eliminate nodes below this threshold [default: %default]")
     optparser.add_option(
         '-e', '--edge-thres', metavar='PERCENTAGE',
-        type="float", dest="edge_thres", default=0.1,
+        type="float", dest="edge_thres", default=Options.edge_thres,
         help="eliminate edges below this threshold [default: %default]")
     optparser.add_option(
         '-f', '--format',
@@ -3066,89 +3064,132 @@ def main():
     optparser.add_option(
         '--total',
         type="choice", choices=('callratios', 'callstacks'),
-        dest="totalMethod", default=totalMethod,
+        dest="totalMethod", default=Options.totalMethod,
         help="preferred method of calculating total time: callratios or callstacks (currently affects only perf format) [default: %default]")
     optparser.add_option(
         '-c', '--colormap',
         type="choice", choices=('color', 'pink', 'gray', 'bw', 'print'),
-        dest="theme", default="color",
+        dest="theme", default=Options.theme,
         help="color map: color, pink, gray, bw, or print [default: %default]")
     optparser.add_option(
         '-s', '--strip',
         action="store_true",
-        dest="strip", default=False,
+        dest="strip", default=Options.strip,
         help="strip function parameters, template parameters, and const modifiers from demangled C++ function names")
     optparser.add_option(
         '-w', '--wrap',
         action="store_true",
-        dest="wrap", default=False,
+        dest="wrap", default=Options.wrap,
         help="wrap function names")
     optparser.add_option(
         '--show-samples',
         action="store_true",
-        dest="show_samples", default=False,
+        dest="show_samples", default=Options.show_samples,
         help="show function samples")
     # add option to create subtree or show paths
     optparser.add_option(
         '-z', '--root',
         type="string",
-        dest="root", default="",
+        dest="root", default=Options.root,
         help="prune call graph to show only descendants of specified root function")
     optparser.add_option(
         '-l', '--leaf',
         type="string",
-        dest="leaf", default="",
+        dest="leaf", default=Options.leaf,
         help="prune call graph to show only ancestors of specified leaf function")
     # add a new option to control skew of the colorization curve
     optparser.add_option(
         '--skew',
-        type="float", dest="theme_skew", default=1.0,
+        type="float", dest="theme_skew", default=Options.theme_skew,
         help="skew the colorization curve.  Values < 1.0 give more variety to lower percentages.  Values > 1.0 give less variety to lower percentages")
-    (options, args) = optparser.parse_args(sys.argv[1:])
+    return optparser
 
+
+class Options(object):
+    
+    # Custom depending on format (i.e.: pstats.Stats for PstatsParser). This is an optional
+    # attribute (if it's not available, args is used in handle_options). 
+    input=None 
+    
+    # string (for filename) or stream for output
+    output=None 
+    
+    node_thres=0.5
+    edge_thres=0.1
+    format="prof"
+    totalMethod=totalMethod
+    theme="color"
+    strip=False
+    wrap=False
+    show_samples=False
+    root=""
+    leaf=""
+    theme_skew=1.0
+    
+    
+
+def handle_options(options, args, onerror):
+    '''
+    :param Options options:
+        An instance with the same attributes as Options.
+        
+    :param list(str) args:
+        The files to be handled. Ignored if Options.input is available and not None.
+        
+    :param callable(str) onerror:
+        A callable that receives a string to show some error to the user.
+    '''
     if len(args) > 1 and options.format != 'pstats':
-        optparser.error('incorrect number of arguments')
+        onerror('incorrect number of arguments')
 
     try:
         theme = themes[options.theme]
     except KeyError:
-        optparser.error('invalid colormap \'%s\'' % options.theme)
+        onerror('invalid colormap \'%s\'' % options.theme)
 
     # set skew on the theme now that it has been picked.
     if options.theme_skew:
         theme.skew = options.theme_skew
 
+    global totalMethod
     totalMethod = options.totalMethod
 
     try:
         Format = formats[options.format]
     except KeyError:
-        optparser.error('invalid format \'%s\'' % options.format)
+        onerror('invalid format \'%s\'' % options.format)
 
-    if Format.stdinInput:
-        if not args:
-            fp = sys.stdin
-        else:
-            fp = open(args[0], 'rt')
-        parser = Format(fp)
-    elif Format.multipleInput:
-        if not args:
-            optparser.error('at least a file must be specified for %s input' % options.format)
-        parser = Format(*args)
+    if getattr(options, 'input', None) is not None:
+        parser = Format(options.input)
     else:
-        if len(args) != 1:
-            optparser.error('exactly one file must be specified for %s input' % options.format)
-        parser = Format(args[0])
+        if Format.stdinInput:
+            if not args:
+                fp = sys.stdin
+            else:
+                fp = open(args[0], 'rt')
+            parser = Format(fp)
+        elif Format.multipleInput:
+            if not args:
+                onerror('at least a file must be specified for %s input' % options.format)
+            parser = Format(*args)
+        else:
+            if len(args) != 1:
+                onerror('exactly one file must be specified for %s input' % options.format)
+            parser = Format(args[0])
 
     profile = parser.parse()
 
     if options.output is None:
         output = sys.stdout
     else:
-        if PYTHON_3:
-            output = open(options.output, 'wt', encoding='UTF-8')
+        if isinstance(options.output, str):
+            if PYTHON_3:
+                output = open(options.output, 'wt', encoding='UTF-8')
+            else:
+                output = open(options.output, 'wt')
         else:
-            output = open(options.output, 'wt')
+            # If a string was not passed, consider output a stream
+            output = options.output
 
     dot = DotWriter(output)
     dot.strip = options.strip
@@ -3162,18 +3203,36 @@ def main():
     if options.root:
         rootId = profile.getFunctionId(options.root)
         if not rootId:
-            sys.stderr.write('root node ' + options.root + ' not found (might already be pruned : try -e0 -n0 flags)\n')
-            sys.exit(1)
+            show_error_and_exit('root node %s not found (might already be pruned : try -e0 -n0 flags)\n' % (options.root,))
         profile.prune_root(rootId)
     if options.leaf:
         leafId = profile.getFunctionId(options.leaf)
         if not leafId:
-            sys.stderr.write('leaf node ' + options.leaf + ' not found (maybe already pruned : try -e0 -n0 flags)\n')
-            sys.exit(1)
+            show_error_and_exit('leaf node not found (maybe already pruned : try -e0 -n0 flags)\n' % (options.leaf,))
         profile.prune_leaf(leafId)
 
     dot.graph(profile, theme)
 
 
+def main():
+    """Main program."""
+    optparser = createOptionParser()
+    options, args = optparser.parse_args(sys.argv[1:])
+    return handle_options(options, args, optparser.error)
+
+
+def show_error_and_exit(msg):
+    """
+    Default implementation throws AssertionError (when we're using it programatically), but if this
+    is the __main__ module, it's rebound to an implementation that actually exits the program.
+    """
+    raise AssertionError(msg)
+
 if __name__ == '__main__':
+    
+    # Rebind to actually exit after showing error message.
+    def show_error_and_exit(msg):
+        sys.stderr.write(msg)
+        sys.exit(1)
+
     main()
