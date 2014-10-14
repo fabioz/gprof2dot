@@ -3195,7 +3195,7 @@ def handle_options(options, args, onerror):
     if options.output is None:
         output = sys.stdout
     else:
-        if isinstance(options.output, str):
+        if isinstance(options.output, basestring):
             if PYTHON_3:
                 output = open(options.output, 'wt', encoding='UTF-8')
             else:
