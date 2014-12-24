@@ -2913,7 +2913,24 @@ class DotWriter:
             else:
                 weight = 0.0
 
-            label = '\n'.join(labels)
+            if not PYTHON_3:
+                new_labels =[]
+                for i, l in enumerate(labels):
+                    if i == 0:
+                        if isinstance(l, str):
+                            # First one is the filename
+                            l = l.decode(sys.getfilesystemencoding(), 'replace')
+                    else:
+                        if isinstance(l, str):
+                            # Method name: usually ascii, but could be something else!
+                            # Is there a way to know about it? Who knows?
+                            l = l.decode('utf-8', 'replace')
+                    new_labels.append(l)
+                labels = new_labels
+                label = unicode('\n').join(labels)
+            else:
+                label = '\n'.join(labels)
+                
             self.node(function.id, 
                 label = label, 
                 color = self.color(theme.node_bgcolor(weight)), 
@@ -3017,7 +3034,7 @@ class DotWriter:
         return "#" + "".join(["%02x" % float2int(c) for c in (r, g, b)])
 
     def escape(self, s):
-        if not PYTHON_3:
+        if not PYTHON_3 and isinstance(s, unicode):
             s = s.encode('utf-8')
         s = s.replace('\\', r'\\')
         s = s.replace('\n', r'\n')
